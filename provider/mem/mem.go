@@ -242,9 +242,21 @@ func (a *Alerts) Put(alerts ...*types.Alert) error {
 		if old, err := a.alerts.Get(fp); err == nil {
 			existing = true
 
-			// Merge alerts if there is an overlap in activity range.
-			if (alert.EndsAt.After(old.StartsAt) && alert.EndsAt.Before(old.EndsAt)) ||
-				(alert.StartsAt.After(old.StartsAt) && alert.StartsAt.Before(old.EndsAt)) {
+			// Merge alerts if there is an overlap in activity range, or if
+			// the new alert is resolving the existing alert.
+			// Overlap check: check if alert's time range overlaps with old's time range.
+			// Handle equal timestamps as overlapping (use !Before instead of After).
+			// An alert with zero EndsAt is considered active indefinitely.
+			hasOverlap := (!old.EndsAt.IsZero() && !alert.EndsAt.Before(old.StartsAt) && alert.EndsAt.Before(old.EndsAt)) ||
+				(!alert.StartsAt.Before(old.StartsAt) && (old.EndsAt.IsZero() || alert.StartsAt.Before(old.EndsAt)))
+			
+			// Merge if the new alert is resolving the old alert (setting endsAt to resolve it).
+			// This handles the case where an alert is resolved via API without time overlap.
+			// An alert is being resolved if it has endsAt set and the old alert doesn't,
+			// or if the new endsAt is earlier than the old endsAt.
+			isResolving := !alert.EndsAt.IsZero() && (old.EndsAt.IsZero() || alert.EndsAt.Before(old.EndsAt))
+			
+			if hasOverlap || isResolving {
 				alert = old.Merge(alert)
 			}
 		}
